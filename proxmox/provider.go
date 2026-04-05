@@ -278,8 +278,8 @@ func providerConfigure(d *schema.ResourceData) (any, error) {
 		} else if result, ok := d.GetOk(schemaPmUser); ok {
 			id = result.(string)
 		}
-		userID, err := pveSDK.NewUserID(id)
-		if err != nil {
+		var userID pveSDK.UserID
+		if err := userID.Parse(id); err != nil {
 			return nil, err
 		}
 		permList, err := client.GetUserPermissions(context.Background(), userID, "/")
