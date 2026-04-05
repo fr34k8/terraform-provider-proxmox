@@ -98,6 +98,7 @@ The following arguments are supported in the top level resource block.
 | `description`                 | `str`    |                      | The description of the VM. Shows as the 'Notes' field in the Proxmox GUI. |
 | `define_connection_info`      | `bool`   | `true`               | Whether to let terraform define the (SSH) connection parameters for preprovisioners, see config block below. |
 | `bios`                        | `str`    | `"seabios"`          | The BIOS to use, options are `seabios` or `ovmf` for UEFI. |
+| `efidisk`                     | `nested` |                      | The configuration for the EFI disk, see [EFI Disk Block](#efi-disk-block) section.|
 | `start_at_node_boot`          | `bool`   | `false`              | Whether the guest should start automatically when the Proxmox node boots.|
 | `startup_shutdown`            | `nested` |                      | Startup and shutdown configuration of the guest, see [Startup and Shutdown Reference](#startup-and-shutdown-reference).|
 | `vm_state`                    | `string` | `"running"`          | The desired state of the VM, options are `running`, `stopped` and `started`. Do note that `started` will only start the vm on creation and won't fully manage the power state unlike `running` and `stopped` do. |
@@ -593,19 +594,22 @@ resource "proxmox_vm_qemu" "resource-name" {
   // ...
 
   efidisk {
-    efitype = "4m"
     storage = "local-lvm"
+    efitype = "4m"
+    format = "raw"
+    pre_enrolled_keys = true
   }
 }
 ```
 
 See the [docs about EFI disks](https://pve.proxmox.com/pve-docs/chapter-qm.html#qm_bios_and_uefi) for more details.
 
-| Argument            | Type   | Default Value | Description                                                           |
-| ------------------- | ------ | ------------- | --------------------------------------------------------------------- |
-| `pre_enrolled_keys` | `bool` | `false`       | Whether or not to pre-enroll secure boot keys and thus enable secure boot |
-| `efitype`           | `str`  | `"4m"`        | The type of efi disk device to add. Options: `2m`, `4m`               |
-| `storage`           | `str`  |               | **Required** The name of the storage pool on which to store the disk. |
+| Argument            | Type   | Default Value | Description
+| ------------------- | ------ | ------------- | -----------
+| `storage`           | `str`  |               | **Required** The name of the storage pool on which to store the disk.
+| `efitype`           | `str`  | `"4m"`        | The type of efi disk device to add. Options: `2m`, `4m`.
+| `format`            | `str`  | `"raw"`       | The format of the EFI disk. Options: `raw`, `qcow2`, `qcow` `vmdk`.
+| `pre_enrolled_keys` | `bool` | `false`       | Whether or not to pre-enroll secure boot keys and thus enable secure boot.
 
 ### PCI Block
 
