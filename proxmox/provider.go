@@ -13,6 +13,7 @@ import (
 	"time"
 
 	pveSDK "github.com/Telmate/proxmox-api-go/proxmox"
+	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/util"
 	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/validator"
 	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -42,6 +43,7 @@ const (
 )
 
 type providerConfiguration struct {
+	NewClient                          *pveSDK.ClientNew
 	Client                             *pveSDK.Client
 	MaxParallel                        int
 	CurrentParallel                    int
@@ -288,7 +290,7 @@ func providerConfigure(d *schema.ResourceData) (any, error) {
 		sort.Strings(minimumPermissions)
 		permDiff := permissions_check(permList, minimumPermissions)
 		if len(permDiff) != 0 {
-			return nil, fmt.Errorf("permissions for user/token "+userID.ToString()+" are not sufficient, please provide also the following permissions that are missing: %v", permDiff)
+			return nil, fmt.Errorf("permissions for user/token "+userID.String()+" are not sufficient, please provide also the following permissions that are missing: %v", permDiff)
 		}
 	}
 
@@ -312,6 +314,7 @@ func providerConfigure(d *schema.ResourceData) (any, error) {
 
 	var mut sync.Mutex
 	return &providerConfiguration{
+		NewClient:                          util.Pointer(client.New()),
 		Client:                             client,
 		MaxParallel:                        d.Get(schemaPmParallel).(int),
 		CurrentParallel:                    0,
@@ -364,8 +367,7 @@ func getClient(pm_api_url string,
 		return nil, proxyErr
 	}
 
-	client, _ := pveSDK.NewClient(pm_api_url, httpClient, pm_http_headers, tlsconf, proxyServer, pm_timeout)
-	*pveSDK.Debug = pm_debug
+	client, _ := pveSDK.NewClient(pm_api_url, httpClient, pm_http_headers, tlsconf, proxyServer, pm_timeout, pm_debug)
 
 	// User+Pass authentication
 	if pm_user != "" && pm_password != "" {
@@ -374,8 +376,12 @@ func getClient(pm_api_url string,
 
 	// API authentication
 	if pm_api_token_id != "" && pm_api_token_secret != "" {
+		tokenID := &pveSDK.ApiTokenID{}
+		if err = tokenID.Parse(pm_api_token_id); err != nil {
+			return nil, err
+		}
 		// Unsure how to get an err for this
-		client.SetAPIToken(pm_api_token_id, pm_api_token_secret)
+		client.SetAPIToken(*tokenID, pveSDK.ApiTokenSecret(pm_api_token_secret))
 	}
 
 	if err != nil {

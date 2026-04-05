@@ -44,16 +44,16 @@ func resourcePool() *schema.Resource {
 
 func resourcePoolCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	pconf := meta.(*providerConfiguration)
-	client := pconf.Client
+	client := pconf.NewClient
 	lock := pmParallelBegin(pconf)
 	defer lock.unlock()
 
 	poolid := d.Get("poolid").(string)
 
-	err := pveSDK.ConfigPool{
+	err := client.Pool.Create(ctx, pveSDK.ConfigPool{
 		Name:    pveSDK.PoolName(poolid),
 		Comment: util.Pointer(d.Get("comment").(string)),
-	}.Create(ctx, client)
+	})
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -72,7 +72,7 @@ func resourcePoolRead(ctx context.Context, d *schema.ResourceData, meta interfac
 
 func _resourcePoolRead(ctx context.Context, d *schema.ResourceData, meta interface{}) error {
 	pconf := meta.(*providerConfiguration)
-	client := pconf.Client
+	client := pconf.NewClient
 
 	_, poolID, err := parseClusterResourceId(d.Id())
 	if err != nil {
@@ -80,12 +80,10 @@ func _resourcePoolRead(ctx context.Context, d *schema.ResourceData, meta interfa
 		return fmt.Errorf("unexpected error when trying to read and parse resource id: %v", err)
 	}
 
-	pool := pveSDK.PoolName(poolID)
-
 	logger, _ := CreateSubLogger("resource_pool_read")
 	logger.Info().Str("poolid", poolID).Msg("Reading configuration for poolid")
 
-	rawPool, err := pool.Get(ctx, client)
+	rawPool, err := client.Pool.Read(ctx, pveSDK.PoolName(poolID))
 	if err != nil {
 		d.SetId("")
 		return nil
@@ -106,7 +104,7 @@ func resourcePoolUpdate(ctx context.Context, d *schema.ResourceData, meta interf
 
 	logger, _ := CreateSubLogger("resource_pool_update")
 
-	client := pconf.Client
+	client := pconf.NewClient
 	_, poolID, err := parseClusterResourceId(d.Id())
 	if err != nil {
 		return diag.FromErr(err)
@@ -115,10 +113,10 @@ func resourcePoolUpdate(ctx context.Context, d *schema.ResourceData, meta interf
 	logger.Info().Str("poolid", poolID).Msg("Starting update of the Pool resource")
 
 	if d.HasChange("comment") {
-		err := pveSDK.ConfigPool{
+		err := client.Pool.Update(ctx, pveSDK.ConfigPool{
 			Name:    pveSDK.PoolName(poolID),
 			Comment: util.Pointer(d.Get("comment").(string)),
-		}.Update(ctx, client)
+		})
 		if err != nil {
 			return diag.FromErr(err)
 		}
@@ -132,15 +130,14 @@ func resourcePoolDelete(ctx context.Context, d *schema.ResourceData, meta interf
 	lock := pmParallelBegin(pconf)
 	defer lock.unlock()
 
-	client := pconf.Client
+	client := pconf.NewClient
 	_, poolID, err := parseClusterResourceId(d.Id())
 
 	if err != nil {
 		return diag.FromErr(err)
 	}
-	if err = pveSDK.PoolName(poolID).Delete(ctx, client); err != nil {
+	if _, err = client.Pool.Delete(ctx, pveSDK.PoolName(poolID)); err != nil {
 		return diag.FromErr(err)
 	}
-
 	return nil
 }
