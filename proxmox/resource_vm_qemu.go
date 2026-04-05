@@ -28,6 +28,7 @@ import (
 	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/qemu/cloudinit"
 	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/qemu/cpu"
 	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/qemu/disk"
+	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/qemu/efi"
 	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/qemu/network"
 	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/qemu/pci"
 	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/qemu/rng"
@@ -350,37 +351,9 @@ func resourceVmQemu() *schema.Resource {
 			pci.RootPCI:       pci.SchemaPCI(),
 			pci.RootPCIs:      pci.SchemaPCIs(),
 			tpm.Root:          tpm.Schema(),
-			"efidisk": {
-				Type:     schema.TypeList,
-				Optional: true,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"storage": {
-							Type:     schema.TypeString,
-							Required: true,
-							ForceNew: true,
-						},
-						"pre_enrolled_keys": {
-							Type:     schema.TypeBool,
-							Optional: true,
-							Default:  false,
-							ForceNew: true,
-						},
-						"efitype": {
-							Type:     schema.TypeString,
-							Optional: true,
-							Default:  "4m",
-							ValidateFunc: validation.StringInSlice([]string{
-								"2m",
-								"4m",
-							}, false),
-							ForceNew: true,
-						},
-					},
-				},
-			},
-			disk.RootDisk:  disk.SchemaDisk(),
-			disk.RootDisks: disk.SchemaDisks(),
+			efi.Root:          efi.Schema(),
+			disk.RootDisk:     disk.SchemaDisk(),
+			disk.RootDisks:    disk.SchemaDisks(),
 			// Other
 			serial.Root:  serial.Schema(),
 			usb.RootUSB:  usb.SchemaUSB(),
@@ -543,8 +516,6 @@ func resourceVmQemuCreate(ctx context.Context, d *schema.ResourceData, meta inte
 	vga := d.Get("vga").(*schema.Set)
 	qemuVgaList := vga.List()
 
-	qemuEfiDisks, _ := ExpandDevicesList(d.Get("efidisk").([]interface{}))
-
 	config := pveSDK.ConfigQemu{
 		Agent:            mapToSDK_QemuGuestAgent(d),
 		Args:             d.Get("args").(string),
@@ -554,6 +525,7 @@ func resourceVmQemuCreate(ctx context.Context, d *schema.ResourceData, meta inte
 		CPU:              cpu.SDK(d),
 		CloudInit:        cloudinit.SDK(d),
 		Description:      description.SDK(true, d),
+		EfiDisk:          efi.SDK(d),
 		HaGroup:          d.Get("hagroup").(string),
 		HaState:          d.Get("hastate").(string),
 		Hotplug:          d.Get("hotplug").(string),
@@ -598,10 +570,6 @@ func resourceVmQemuCreate(ctx context.Context, d *schema.ResourceData, meta inte
 
 	if len(qemuVgaList) > 0 {
 		config.QemuVga = qemuVgaList[0].(map[string]interface{})
-	}
-
-	if len(qemuEfiDisks) > 0 {
-		config.EFIDisk = qemuEfiDisks[0]
 	}
 
 	var vmr *pveSDK.VmRef
@@ -810,6 +778,7 @@ func resourceVmQemuUpdate(ctx context.Context, d *schema.ResourceData, meta inte
 		CPU:              cpu.SDK(d),
 		CloudInit:        cloudinit.SDK(d),
 		Description:      description.SDK(true, d),
+		EfiDisk:          efi.SDK(d),
 		HaGroup:          d.Get("hagroup").(string),
 		HaState:          d.Get("hastate").(string),
 		Hotplug:          d.Get("hotplug").(string),
@@ -991,7 +960,7 @@ func resourceVmQemuRead(ctx context.Context, d *schema.ResourceData, vmr *pveSDK
 	}
 	reboot.SetRequired(pending, d)
 	var config *pveSDK.ConfigQemu
-	config, err = raw.Get(vmr)
+	config, err = raw.Get(*vmr)
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -1060,6 +1029,9 @@ func resourceVmQemuRead(ctx context.Context, d *schema.ResourceData, vmr *pveSDK
 	}
 	if config.CloudInit != nil {
 		cloudinit.Terraform(config.CloudInit, d)
+	}
+	if config.EfiDisk != nil {
+		efi.Terraform(config.EfiDisk, d)
 	}
 	mapToTerraform_Memory(config.Memory, d)
 	if len(config.Networks) != 0 {

@@ -892,18 +892,24 @@ func resourceLxcRead(ctx context.Context, d *schema.ResourceData, vmr *pveSDK.Vm
 	}
 
 	// Pool
-	pools, err := pveSDK.ListPools(ctx, client)
+	c := client.New()
+	rawPools, err := c.Pool.List(ctx)
 	if err != nil {
 		return append(diags, diag.FromErr(err)...)
 	}
+
+	var rawPoolInfo pveSDK.RawPoolInfo
 pools:
-	for i := range pools {
-		raw, _ := pveSDK.PoolName(pools[i]).Get(ctx, client)
-		members := raw.GetGuests()
-		if members != nil {
-			for _, memberID := range *members {
-				if vmr.VmId() == memberID {
-					d.Set(pool.Root, pools[i])
+	for e := range rawPools.Iter() {
+		rawPoolInfo, err = c.Pool.Read(ctx, e.GetName())
+		if err != nil {
+			return append(diags, diag.FromErr(err)...)
+		}
+		members := rawPoolInfo.GetMembers()
+		for ee := range members.Iter() {
+			if guest, ok := ee.AsGuest(); ok {
+				if vmr.VmId() == guest.GetID() {
+					d.Set(pool.Root, e.GetName())
 					break pools
 				}
 			}
