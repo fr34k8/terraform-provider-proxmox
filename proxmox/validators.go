@@ -65,11 +65,3 @@ func BIOSValidator() schema.SchemaValidateDiagFunc {
 		"seabios",
 	}, false))
 }
-
-func VMStateValidator() schema.SchemaValidateDiagFunc {
-	return validation.ToDiagFunc(validation.StringInSlice([]string{
-		stateRunning,
-		stateStopped,
-		stateStarted,
-	}, false))
-}

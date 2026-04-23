@@ -641,6 +641,7 @@ func resourceLxcUpdate(ctx context.Context, d *schema.ResourceData, meta interfa
 	defer lock.unlock()
 
 	client := pconf.Client
+	clientNew := client.New()
 
 	var resourceID id.Guest
 	if err := resourceID.Parse(d.Id()); err != nil {
@@ -777,7 +778,7 @@ func resourceLxcUpdate(ctx context.Context, d *schema.ResourceData, meta interfa
 		case pveSDK.PowerStateStopped:
 			if d.Get("start").(bool) {
 				log.Print("[DEBUG][LXCUpdate] starting LXC")
-				_, err = client.StartVm(ctx, vmr)
+				err = clientNew.Guest.Start(ctx, *vmr)
 				if err != nil {
 					return diag.FromErr(err)
 				}
@@ -785,7 +786,7 @@ func resourceLxcUpdate(ctx context.Context, d *schema.ResourceData, meta interfa
 		case pveSDK.PowerStateRunning:
 			if !d.Get("start").(bool) {
 				log.Print("[DEBUG][LXCUpdate] stopping LXC")
-				if err = vmr.Stop(ctx, client); err != nil {
+				if err = clientNew.Guest.Stop(ctx, *vmr, false); err != nil {
 					return diag.FromErr(err)
 				}
 			}
@@ -892,8 +893,8 @@ func resourceLxcRead(ctx context.Context, d *schema.ResourceData, vmr *pveSDK.Vm
 	}
 
 	// Pool
-	c := client.New()
-	rawPools, err := c.Pool.List(ctx)
+	clientNew := client.New()
+	rawPools, err := clientNew.Pool.List(ctx)
 	if err != nil {
 		return append(diags, diag.FromErr(err)...)
 	}
@@ -901,7 +902,7 @@ func resourceLxcRead(ctx context.Context, d *schema.ResourceData, vmr *pveSDK.Vm
 	var rawPoolInfo pveSDK.RawPoolInfo
 pools:
 	for e := range rawPools.Iter() {
-		rawPoolInfo, err = c.Pool.Read(ctx, e.GetName())
+		rawPoolInfo, err = clientNew.Pool.Read(ctx, e.GetName())
 		if err != nil {
 			return append(diags, diag.FromErr(err)...)
 		}
