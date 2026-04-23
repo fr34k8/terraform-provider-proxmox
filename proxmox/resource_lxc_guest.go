@@ -67,7 +67,7 @@ func resourceLxcGuest() *schema.Resource {
 			operatingsystem.Root:         operatingsystem.Schema(),
 			password.Root:                password.Schema(),
 			pool.Root:                    pool.Schema(),
-			powerstate.Root:              powerstate.Schema(),
+			powerstate.Root:              powerstate.Schema(schema.Schema{Default: powerstate.Default}),
 			privilege.RootPrivileged:     privilege.SchemaPrivileged(),
 			privilege.RootUnprivileged:   privilege.SchemaUnprivileged(),
 			reboot.RootAutomatic:         reboot.SchemaAutomatic(),
@@ -295,7 +295,7 @@ func resourceLxcGuestRead(ctx context.Context, d *schema.ResourceData, vmr *pveS
 	node.Terraform(*config.Node, d)
 	operatingsystem.Terraform(config.OperatingSystem, d)
 	pool.Terraform(config.Pool, d)
-	powerstate.Terraform(guestStatus.GetState(), d)
+	powerstate.Terraform(guestStatus.GetState(), false, d)
 	privilege.Terraform(*config.Privileged, d)
 	rootmount.Terraform(config.BootMount, d)
 	startatnodeboot.Terraform(*config.StartAtNodeBoot, d)
@@ -324,7 +324,7 @@ func lxcSDK(privilidged bool, d *schema.ResourceData) (pveSDK.ConfigLXC, diag.Di
 		Name:            guestName,
 		StartAtNodeBoot: util.Pointer(startatnodeboot.SDK(d)),
 		StartupShutdown: startupshutdown.SDK(d),
-		State:           powerstate.SDK(d),
+		State:           powerstate.SDK(powerstate.LegacyFalse, d),
 		Swap:            swap.SDK(d),
 		Tags:            tags.SDK(d),
 	}

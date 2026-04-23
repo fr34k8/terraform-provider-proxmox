@@ -101,8 +101,7 @@ The following arguments are supported in the top level resource block.
 | `efidisk`                     | `nested` |                      | The configuration for the EFI disk, see [EFI Disk Block](#efi-disk-block) section.|
 | `start_at_node_boot`          | `bool`   | `false`              | Whether the guest should start automatically when the Proxmox node boots.|
 | `startup_shutdown`            | `nested` |                      | Startup and shutdown configuration of the guest, see [Startup and Shutdown Reference](#startup-and-shutdown-reference).|
-| `vm_state`                    | `string` | `"running"`          | The desired state of the VM, options are `running`, `stopped` and `started`. Do note that `started` will only start the vm on creation and won't fully manage the power state unlike `running` and `stopped` do. |
-| `oncreate`                    | `bool`   | `true`               | Whether to have the VM startup after the VM is created (deprecated, use `vm_state` instead) |
+| `power_state`                 | `string` | `"running"`          | Power state of the guest, can be `"running"` or `"stopped"`.|
 | `protection`                  | `bool`   | `false`              | Enable/disable the VM protection from being removed. The default value of `false` indicates the VM is removable. |
 | `tablet`                      | `bool`   | `true`               | Enable/disable the USB tablet device. This device is usually needed to allow absolute mouse positioning with VNC. |
 | `boot`                        | `str`    |                      | The boot order for the VM. For example: `order=scsi0;ide2;net0`. The deprecated `legacy=` syntax is no longer supported. See the `boot` option in the [Proxmox manual](https://pve.proxmox.com/wiki/Manual:_qm.conf#_options) for more information. |

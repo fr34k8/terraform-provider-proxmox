@@ -25,6 +25,7 @@ import (
 	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/name"
 	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/node"
 	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/pool"
+	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/powerstate"
 	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/qemu/cloudinit"
 	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/qemu/cpu"
 	"github.com/Telmate/terraform-provider-proxmox/v2/proxmox/Internal/resource/guest/qemu/disk"
@@ -49,12 +50,6 @@ import (
 // way to look into our own resource definition. Useful for dynamically doing typecasts
 // so that we can print (debug) our ResourceData constructs
 var thisResource *schema.Resource
-
-const (
-	stateRunning string = "running"
-	stateStarted string = "started"
-	stateStopped string = "stopped"
-)
 
 const (
 	schemaAdditionalWait = "additional_wait"
@@ -130,16 +125,8 @@ func resourceVmQemu() *schema.Resource {
 				Description:      "The VM bios, it can be seabios or ovmf",
 				ValidateDiagFunc: BIOSValidator(),
 			},
-			"vm_state": {
-				Type:             schema.TypeString,
-				Optional:         true,
-				Default:          stateRunning,
-				Description:      "The state of the VM (" + stateRunning + ", " + stateStarted + ", " + stateStopped + ")",
-				ValidateDiagFunc: VMStateValidator(),
-				DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
-					return new == stateStarted
-				},
-			},
+			powerstate.Root:            powerstate.Schema(schema.Schema{}),
+			powerstate.LegacyRoot:      powerstate.SchemaLegacy(),
 			startatnodeboot.LegacyRoot: startatnodeboot.LegacySchema(),
 			startatnodeboot.Root:       startatnodeboot.Schema(),
 			startupshutdown.LegacyRoot: startupshutdown.LegacySchema(),
@@ -512,6 +499,7 @@ func resourceVmQemuCreate(ctx context.Context, d *schema.ResourceData, meta inte
 	defer lock.unlock()
 
 	client := pconf.Client
+	clientNew := pconf.NewClient
 	guestName := name.SDK(d) // ensure the name is set in the schema
 	vga := d.Get("vga").(*schema.Set)
 	qemuVgaList := vga.List()
@@ -539,6 +527,7 @@ func resourceVmQemuCreate(ctx context.Context, d *schema.ResourceData, meta inte
 		RandomnessDevice: rng.SDK(d),
 		Scsihw:           d.Get("scsihw").(string),
 		Serials:          serial.SDK(d),
+		State:            powerstate.SDK(powerstate.LegacyCreate, d),
 		Smbios1:          BuildSmbiosArgs(d.Get("smbios").([]any)),
 		StartAtNodeBoot:  util.Pointer(startatnodeboot.SDK(d)),
 		StartupShutdown:  startupshutdown.SDK(d),
@@ -646,7 +635,7 @@ func resourceVmQemuCreate(ctx context.Context, d *schema.ResourceData, meta inte
 			time.Sleep(time.Duration(d.Get("clone_wait").(int)) * time.Second)
 
 			log.Print("[DEBUG][QemuVmCreate] update VM after clone")
-			rebootRequired, err = config.Update(ctx, false, vmr, client)
+			err = clientNew.QemuGuest.Update(ctx, *vmr, false, true, config)
 			if err != nil {
 				// Set the id because when update config fail the vm is still created
 				d.SetId(id.Guest{
@@ -680,14 +669,14 @@ func resourceVmQemuCreate(ctx context.Context, d *schema.ResourceData, meta inte
 			}
 			log.Print("[DEBUG][QemuVmCreate] create with PXE")
 			config.ID = guestID
-			vmr, err = config.Create(ctx, client)
+			vmr, err = clientNew.QemuGuest.Create(ctx, config)
 			if err != nil {
 				return append(diags, diag.FromErr(err)...)
 			}
 		} else { // Normal VM creation
 			log.Print("[DEBUG][QemuVmCreate] create with ISO")
 			config.ID = guestID
-			vmr, err = config.Create(ctx, client)
+			vmr, err = clientNew.QemuGuest.Create(ctx, config)
 			if err != nil {
 				return append(diags, diag.FromErr(err)...)
 			}
@@ -699,10 +688,10 @@ func resourceVmQemuCreate(ctx context.Context, d *schema.ResourceData, meta inte
 		if err != nil {
 			return append(diags, diag.FromErr(err)...)
 		}
-		vmr.Stop(ctx, client) // Why do we not check for error here?
-
-		rebootRequired, err = config.Update(ctx, false, vmr, client)
-		if err != nil {
+		if err = clientNew.Guest.Stop(ctx, *vmr, true); err != nil {
+			return append(diags, diag.FromErr(err)...)
+		}
+		if err = clientNew.QemuGuest.Update(ctx, *vmr, false, true, config); err != nil {
 			// Set the id because when update config fail the vm is still created
 			d.SetId(id.Guest{
 				ID:   vmr.VmId(),
@@ -721,23 +710,6 @@ func resourceVmQemuCreate(ctx context.Context, d *schema.ResourceData, meta inte
 	// give sometime to proxmox to catchup
 	time.Sleep(time.Duration(d.Get(schemaAdditionalWait).(int)) * time.Second)
 
-	if d.Get("vm_state").(string) == "running" || d.Get("vm_state").(string) == "started" {
-		log.Print("[DEBUG][QemuVmCreate] starting VM")
-		_, err := client.StartVm(ctx, vmr)
-		if err != nil {
-			return append(diags, diag.FromErr(err)...)
-		}
-		// // give sometime to proxmox to catchup
-		// time.Sleep(time.Duration(d.Get("additional_wait").(int)) * time.Second)
-
-		// err = initConnInfo(d, pconf, client, vmr, &config, lock)
-		// if err != nil {
-		// 	return diag.FromErr(err)
-		// }
-	} else {
-		log.Print("[DEBUG][QemuVmCreate] vm_state != running, not starting VM")
-	}
-
 	d.Set("reboot_required", rebootRequired)
 	log.Print("[DEBUG][QemuVmCreate] vm creation done!")
 	return append(diags, resourceVmQemuRead(ctx, d, vmr, client)...)
@@ -746,6 +718,7 @@ func resourceVmQemuCreate(ctx context.Context, d *schema.ResourceData, meta inte
 func resourceVmQemuUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	pconf := meta.(*providerConfiguration)
 	client := pconf.Client
+	newClient := pconf.NewClient
 	lock := pmParallelBegin(pconf)
 	defer lock.unlock()
 
@@ -835,70 +808,34 @@ func resourceVmQemuUpdate(ctx context.Context, d *schema.ResourceData, meta inte
 
 	var rebootRequired bool
 	automaticReboot := reboot.GetAutomatic(d)
-	// don't let the update function handel the reboot as it can't deal with cloud init changes yet
-	rebootRequired, err = config.Update(ctx, automaticReboot, vmr, client)
-	if err != nil {
+	desiredState := powerstate.SDK(powerstate.LegacyUpdate, d)
+
+	// If cloud-init changes, we tell it to shutdown to avoid double reboot.
+	// One handled by the SDK and one handled by us to apply the cloud-init changes.
+	// TODO in the future we should let the SDK handle this situation.
+	if cloudinit.NeedsReboot(config.CloudInit, d) {
+		if !automaticReboot {
+			reboot.ErrorQemu(d)
+		}
+		config.State = util.Pointer(pveSDK.PowerStateStopped)
+	} else {
+		config.State = desiredState
+	}
+
+	if err = newClient.QemuGuest.Update(ctx, *vmr, automaticReboot, true, config); err != nil {
 		if err.Error() == pveSDK.ConfigQemu_Error_UnableToUpdateWithoutReboot {
+			// Automatic reboots is not enabled, show the user a error message that
+			// the VM needs a reboot for the changed parameters to take in effect.
 			return append(diags, reboot.ErrorQemu(d))
 		}
-		return diag.FromErr(err)
-	}
-
-	// If cloud-init changes, a reboot is required
-	if cloudinit.NeedsReboot(config.CloudInit, d) {
-		rebootRequired = true
-	}
-
-	// Try rebooting the VM is a reboot is required and automatic_reboot is
-	// enabled. Attempt a graceful shutdown or if that fails, force power-off.
-	guestStatus, err := vmr.GetRawGuestStatus(ctx, client)
-	if err != nil {
 		return append(diags, diag.FromErr(err)...)
 	}
-	switch guestStatus.GetState() { // manage the VM state to match the `vm_state` attribute
-	// case stateStarted: does nothing during update as we don't enforce the VM state
-	case pveSDK.PowerStateStopped:
-		if d.Get("vm_state").(string) == stateRunning { // start the VM
-			log.Print("[DEBUG][QemuVmUpdate] starting VM to match `vm_state`")
-			if _, err = client.StartVm(ctx, vmr); err != nil {
-				return append(diags, diag.FromErr(err)...)
-			}
-		}
-	case pveSDK.PowerStateRunning:
-		if d.Get("vm_state").(string) == stateStopped { // shutdown the VM
-			log.Print("[DEBUG][QemuVmUpdate] shutting down VM to match `vm_state`")
-			_, err = client.ShutdownVm(ctx, vmr)
-			// note: the default timeout is 3 min, configurable per VM: Options/Start-Shutdown Order/Shutdown timeout
-			if err != nil {
-				log.Print("[DEBUG][QemuVmUpdate] shutdown failed, stopping VM forcefully")
 
-				if err = vmr.Stop(ctx, client); err != nil {
-					return append(diags, diag.FromErr(err)...)
-				}
-			}
-		} else if rebootRequired { // reboot the VM
-			if automaticReboot { // automatic reboots is enabled
-				log.Print("[DEBUG][QemuVmUpdate] rebooting the VM to match the configuration changes")
-				_, err = client.RebootVm(ctx, vmr)
-				// note: the default timeout is 3 min, configurable per VM: Options/Start-Shutdown Order/Shutdown timeout
-				if err != nil {
-					log.Print("[DEBUG][QemuVmUpdate] reboot failed, stopping VM forcefully")
-					if err = vmr.Stop(ctx, client); err != nil {
-						return append(diags, diag.FromErr(err)...)
-					}
-					// give sometime to proxmox to catchup
-					dur := time.Duration(d.Get(schemaAdditionalWait).(int)) * time.Second
-					log.Printf("[DEBUG][QemuVmUpdate] waiting for (%v) before starting the VM again", dur)
-					time.Sleep(dur)
-					if _, err := client.StartVm(ctx, vmr); err != nil {
-						return append(diags, diag.FromErr(err)...)
-					}
-				}
-			} else { // automatic reboots is disabled
-				// Automatic reboots is not enabled, show the user a error message that
-				// the VM needs a reboot for the changed parameters to take in effect.
-				return append(diags, reboot.ErrorQemu(d))
-			}
+	// We only have to handle the running state.
+	// The SDK will handle the stopped state correctly by shutting down the VM before applying the changes.
+	if desiredState != nil && *desiredState == pveSDK.PowerStateRunning && *config.State != pveSDK.PowerStateRunning {
+		if err = newClient.Guest.Start(ctx, *vmr); err != nil {
+			return append(diags, diag.FromErr(err)...)
 		}
 	}
 

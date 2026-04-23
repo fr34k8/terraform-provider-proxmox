@@ -5,13 +5,30 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
-func Terraform(state pveSDK.PowerState, d *schema.ResourceData) {
-	switch state {
+func Terraform(config pveSDK.PowerState, legacy bool, d *schema.ResourceData) {
+	if _, ok := d.GetOk(Root); ok {
+		d.Set(Root, terraform(config))
+		if legacy {
+			terraformLegacyClear(d)
+		}
+		return
+	}
+	if legacy {
+		if _, ok := d.GetOk(LegacyRoot); ok {
+			terraformLegacy(config,d)
+			return
+		}
+	}
+	d.Set(Root, terraform(config))
+}
+
+func terraform(config pveSDK.PowerState) string {
+	switch config {
 	case pveSDK.PowerStateRunning:
-		d.Set(Root, enumRunning)
+		return enumRunning
 	case pveSDK.PowerStateStopped:
-		d.Set(Root, enumStopped)
+		return enumStopped
 	default:
-		d.Set(Root, "")
+		return ""
 	}
 }
